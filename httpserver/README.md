@@ -104,12 +104,61 @@ $ make build run-docker
 docker build --build-arg version=v2.1.0 . -t httpserver:latest
 ...
 
-docker run -it --rm -p 8081:8081 httpserver:latest
+docker run -it --name=httpserver --rm -p 8081:8081 httpserver:latest
 ...
 ```
 
 4. 测试镜像
 ```shell
 $ make test
+```
+
+# 模块三作业
+
+群昵称：我来也-武汉
+
+## 要求
+- 构建本地镜像。
+- 编写 Dockerfile 将练习 2.2 编写的 httpserver 容器化（请思考有哪些最佳实践可以引入到 Dockerfile 中来）。
+- 将镜像推送至 Docker 官方镜像仓库。
+- 通过 Docker 命令本地启动 httpserver。
+- 通过 nsenter 进入容器查看 IP 配置。
+
+作业需编写并提交 Dockerfile 及源代码。
+
+## 说明
+本次作业大部分在上次就完成了，这次只补充一下`推送镜像`和`nsenter`查看容器IP配置的部分。
+
+### 推送镜像
+模拟推送，并不会真的推送成功。😁
+```
+$ make push
+
+docker push httpserver:latest
+```
+
+### nsenter 进入容器查看 IP 配置
+```
+# 获取容器的进程号
+$ PID=$(docker inspect --format {{.State.Pid}} httpserver)
+
+# 进入 nsenter 容器 (MacOS 环境无法直接使用 nsenter 命令，Linux 环境可以跳过该步骤)
+$ docker run -it --rm --privileged --pid=host justincormack/nsenter1
+
+# 查看 IP 信息 (需要将 $PID 替换成对应的值)
+$ nsenter --target $PID --mount --uts --ipc --net --pid ip addr
+
+1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN qlen 1000
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+    inet 127.0.0.1/8 scope host lo
+       valid_lft forever preferred_lft forever
+2: tunl0@NONE: <NOARP> mtu 1480 qdisc noop state DOWN qlen 1000
+    link/ipip 0.0.0.0 brd 0.0.0.0
+3: ip6tnl0@NONE: <NOARP> mtu 1452 qdisc noop state DOWN qlen 1000
+    link/tunnel6 00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00 brd 00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00
+10: eth0@if11: <BROADCAST,MULTICAST,UP,LOWER_UP,M-DOWN> mtu 1500 qdisc noqueue state UP
+    link/ether 02:42:ac:11:00:02 brd ff:ff:ff:ff:ff:ff
+    inet 172.17.0.2/16 brd 172.17.255.255 scope global eth0
+       valid_lft forever preferred_lft forever
 ```
 

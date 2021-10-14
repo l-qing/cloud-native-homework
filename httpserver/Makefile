@@ -18,8 +18,11 @@ test: ## Test use curl
 build: ## Build docker image
 	docker build --build-arg version=v2.1.0 . -t httpserver:latest
 
+push: ## Push docker image
+	docker push httpserver:latest
+
 run-docker: ## Run docker image
-	docker run -it --rm -p 8081:8081 httpserver:latest
+	docker run -it --name=httpserver --rm -p 8081:8081 httpserver:latest
 
 ##@ General
 
