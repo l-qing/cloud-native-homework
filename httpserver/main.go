@@ -73,6 +73,7 @@ func HandleGetAllData(c *gin.Context) {
 	fmt.Println("---header/--- ")
 	for k, v := range c.Request.Header {
 		fmt.Println(k, v)
+		// The request header will be written to the response header
 		c.Header(k, c.GetHeader(k))
 	}
 
