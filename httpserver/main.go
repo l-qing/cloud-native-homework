@@ -1,23 +1,81 @@
 package main
 
 import (
+	"context"
+	"flag"
 	"fmt"
 	"io/ioutil"
+	"math/rand"
+	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	log "k8s.io/klog/v2"
 )
 
 var (
-	VERSION string
+	VERSION           string
+	VERSION_SECRET    string
+	VERSION_CONFIGMAP string
+	srv               *http.Server
 )
 
 func init() {
 	VERSION = os.Getenv("VERSION")
+	VERSION_SECRET = os.Getenv("VERSION_SECRET")
+	VERSION_CONFIGMAP = os.Getenv("VERSION_CONFIGMAP")
+	rand.Seed(time.Now().UnixNano())
+	log.InitFlags(nil)
 }
 
 func main() {
+
+	flag.Parse()
+
+	// 测试：幽雅启动
+	mockDelay()
+
+	httpServerStart()
+
+	// 测试：幽雅终止
+	// signal
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, syscall.SIGHUP, syscall.SIGQUIT, syscall.SIGTERM, syscall.SIGINT)
+	for {
+		s := <-c
+		log.V(1).Infof("get a signal %s", s.String())
+		switch s {
+		case syscall.SIGQUIT, syscall.SIGTERM, syscall.SIGINT:
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := srv.Shutdown(ctx); err != nil {
+				log.Fatal("Server Shutdown:", err)
+			}
+			log.V(0).InfoS("Server exiting")
+			log.Flush()
+			return
+		case syscall.SIGHUP:
+		default:
+			return
+		}
+	}
+}
+
+func mockDelay() {
+	log.V(1).InfoS("debug", "VERSION", VERSION,
+		"VERSION_SECRET", VERSION_SECRET, "VERSION_CONFIGMAP", VERSION_CONFIGMAP)
+
+	// Simulation of start-up elapsed time
+	sleep := time.Duration(rand.Intn(5)+1) * time.Second
+	log.V(1).InfoS("mock startup", "sleep", sleep)
+	time.Sleep(sleep)
+}
+
+func httpServerStart() {
+	log.V(1).InfoS("start httpserver")
 	// Creates a router without any middleware by default
 	r := gin.New()
 
@@ -64,15 +122,25 @@ func main() {
 		c.String(200, "ok")
 	})
 
-	r.Run(":8081")
+	srv = &http.Server{
+		Addr:    ":8081",
+		Handler: r,
+	}
+
+	go func() {
+		// service connections
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("listen: %s\n", err)
+		}
+	}()
 }
 
 func HandleGetAllData(c *gin.Context) {
 	body, _ := ioutil.ReadAll(c.Request.Body)
-	fmt.Println("---body/--- \r\n" + string(body))
-	fmt.Println("---header/--- ")
+	log.V(2).Infof("---body/--- \r\n" + string(body))
+	log.V(2).Infof("---header/--- \n")
 	for k, v := range c.Request.Header {
-		fmt.Println(k, v)
+		log.V(2).InfoS("Header", k, v)
 		// The request header will be written to the response header
 		c.Header(k, c.GetHeader(k))
 	}
@@ -84,7 +152,9 @@ func HandleGetAllData(c *gin.Context) {
 
 func addVersionHeader() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		c.Header("VERSION", VERSION)
+		c.Header("Version", VERSION)
+		c.Header("Version-Secret", VERSION_SECRET)
+		c.Header("Version-Configmap", VERSION_CONFIGMAP)
 		c.Next()
 	}
 }

@@ -1,3 +1,115 @@
+# 模块八作业
+作业要求
+
+编写 Kubernetes 部署脚本将 httpserver 部署到 kubernetes 集群，以下是你可以思考的维度
+
+优雅启动
+优雅终止
+资源需求和 QoS 保证
+探活
+日常运维需求，日志等级
+配置和代码分离
+尝试用Service、Ingress将你的服务发布给集群外部的调用方
+确保整个应用的高可用
+通过证书保证httpServer的通讯安全
+提交截止时间：11 月 28 日（下周日） 23:59
+
+## 作业说明
+* 优雅启动：模拟了一个启动时的耗时，便于测试启动探针等。也配置了亲和性属性，保证多副本不调度到一个节点上。
+* 优雅终止：程序捕获了信号，并做了幽雅退出操作。Pod也调整了最大超时时间。还可以增加 preStop 钩子。
+* 资源需求：配置了容器的 resources 信息。
+* 探活：新增了启动探针、存活探针、就绪探针。
+* 常运维需求，日志等级：暂时只支持指定参数的方式调整日志级别，暂未实现从configmap中读取该信息。
+* 配置和代码分离：版本信息从env、secret、configmap中配置，并在程序中读取。模拟简单的分离。
+* 高可用：设置了容器副本数，且配置了亲和性。避免因为单节点故障导致服务不可用。（暂时不通过dns实现跨集群的冗余部署。）
+* 外部访问：用NodePord Service、及 Ingress 将服务发布给集群外部的调用方
+
+TODO:
+* 可以从configmap中读取日志配置信息
+* 可以配置日志收集服务，将日志集中收集。
+* 可以配置 HPA，在容器负载发生变化时实现动态扩缩容，减少运维工作量。
+
+## 使用说明
+1. 推送镜像
+
+```shell
+$ VERSION=2.0.1 make build push
+
+docker build --build-arg version=v2.1.0 . -t 190219044/httpserver:2.0.1
+docker push 190219044/httpserver:2.0.1
+```
+
+2. 创建 k8s 资源
+
+```shell
+$ kubectl apply -f deployment.yaml
+
+deployment.apps/cloudnative-httpserver created
+service/cloudnative-httpserver created
+configmap/cloudnative-httpserver-configmap created
+secret/cloudnative-httpserver-secret created
+
+$ kubectl logs -f -l app=cloudnative-httpserver
+
+```
+
+3. 滚动更新
+
+```shell
+$ kubectl set image deployment/cloudnative-httpserver httpserver=190219044/httpserver:2.0.2
+
+deployment.apps/cloudnative-httpserver image updated
+
+$ kubectl get events -w
+
+0s          Normal    ScalingReplicaSet         deployment/cloudnative-httpserver              Scaled up replica set cloudnative-httpserver-69fffbc5c7 to 1
+0s          Normal    SuccessfulDelete          replicaset/cloudnative-httpserver-555bdf4f5d   Deleted pod: cloudnative-httpserver-555bdf4f5d-vnl29
+0s          Normal    ScalingReplicaSet         deployment/cloudnative-httpserver              Scaled down replica set cloudnative-httpserver-555bdf4f5d to 0
+0s          Normal    Killing                   pod/cloudnative-httpserver-555bdf4f5d-vnl29    Stopping container httpserver
+0s          Normal    SuccessfulCreate          replicaset/cloudnative-httpserver-69fffbc5c7   Created pod: cloudnative-httpserver-69fffbc5c7-sgmmr
+0s          Normal    Scheduled                 pod/cloudnative-httpserver-69fffbc5c7-sgmmr    Successfully assigned devops/cloudnative-httpserver-69fffbc5c7-sgmmr to 192.168.130.63
+0s          Normal    Pulling                   pod/cloudnative-httpserver-69fffbc5c7-sgmmr    Pulling image "190219044/httpserver:2.0.2"
+0s          Normal    Pulled                    pod/cloudnative-httpserver-69fffbc5c7-sgmmr    Successfully pulled image "190219044/httpserver:2.0.2" in 33.290581032s
+0s          Normal    Created                   pod/cloudnative-httpserver-69fffbc5c7-sgmmr    Created container httpserver
+0s          Normal    Started                   pod/cloudnative-httpserver-69fffbc5c7-sgmmr    Started container httpserver
+```
+
+4. 模拟外部访问
+```shell
+$ curl -ipv4 --resolve foo.bar.com:80:192.168.130.63 http://foo.bar.com/
+
+* Connection #0 to host foo.bar.com left intact
+{"hello":"world"}
+
+$ curl http://192.168.130.63:31081/hello
+
+{"hello":"world"}
+```
+
+5. 创建 TLS 证书 及给 Ingress 增加 TLS 配置
+```
+$ openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+    -out foo-ingress-tls.crt \
+    -keyout foo-ingress-tls.key \
+    -subj "/CN=foo.bar.com/O=foo-ingress-tls"
+
+$ kubectl create secret tls foo-ingress-tls \
+    --key foo-ingress-tls.key \
+    --cert foo-ingress-tls.crt
+
+$ kubectl apply -f deployment.yaml
+
+$ curl --insecure -ipv4 --resolve foo.bar.com:443:192.168.130.63 https://foo.bar.com/
+
+< strict-transport-security: max-age=31536000; includeSubDomains
+strict-transport-security: max-age=31536000; includeSubDomains
+
+<
+* Connection #0 to host foo.bar.com left intact
+{"hello":"world"}
+```
+
+
 # 模块二作业
 
 群昵称：我来也-武汉

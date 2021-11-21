@@ -1,0 +1,167 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cloudnative-httpserver
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: cloudnative-httpserver
+  strategy:
+    rollingUpdate:
+      # 没有配置成默认的 25% 是因为避免在单节点场景下，只有1个实例时无法滚动更新。
+      maxSurge: 1
+      maxUnavailable: 1
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app: cloudnative-httpserver
+    spec:
+      containers:
+        - name: httpserver
+          image: 190219044/httpserver:2.0.3
+          imagePullPolicy: Always
+          args:
+            # 调整日志级别
+            - -v=2  # TODO: 可以将日志级别等信息放入 configmap 在程序中再从读取
+            - --logtostderr
+          env:
+            - name: VERSION
+              value: "1.0.1"
+          # 配置和代码分离
+          envFrom:
+            - configMapRef:
+                name: cloudnative-httpserver-configmap
+            - secretRef:
+                name: cloudnative-httpserver-secret
+          ports:
+            - name: http
+              containerPort: 8081
+              protocol: TCP
+          # 存活探针、就绪探针、启动探针
+          livenessProbe:
+            failureThreshold: 2
+            httpGet:
+              path: /healthz
+              port: http
+              scheme: HTTP
+            periodSeconds: 10
+            successThreshold: 1
+            timeoutSeconds: 1
+          readinessProbe:
+            failureThreshold: 2
+            httpGet:
+              path: /healthz
+              port: http
+              scheme: HTTP
+            periodSeconds: 10
+            successThreshold: 1
+            timeoutSeconds: 1
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+              scheme: HTTP
+            initialDelaySeconds: 1
+            failureThreshold: 30
+            successThreshold: 1
+            periodSeconds: 10
+            timeoutSeconds: 1
+          # 模拟一个PreStop Hook
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/bin/sh","-c","killall httpserver"]
+          # 资源需求
+          resources:
+            limits:
+              cpu: 100m
+              memory: 128Mi
+            requests:
+              cpu: 50m
+              memory: 64Mi
+          volumeMounts:
+            - mountPath: /etc/httpserver
+              name: config
+      dnsPolicy: ClusterFirst
+      # 配置优雅终止的最长等待时间
+      terminationGracePeriodSeconds: 60
+      # 配置亲和性 保证多个pod不调度到同一个节点
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchExpressions:
+                  - key: "app"
+                    operator: In
+                    values:
+                      - cloudnative-httpserver
+              topologyKey: "kubernetes.io/hostname"
+      volumes:
+        # TODO: 可以在 initContainer 中下载配置文件到这个目录，程序从这里读配置文件。
+        - emptyDir: {}
+          name: config
+---
+# 配置nodeport的服务，便于自测。
+apiVersion: v1
+kind: Service
+metadata:
+  name: cloudnative-httpserver
+spec:
+  type: NodePort
+  externalTrafficPolicy: Cluster
+  ports:
+    - nodePort: 31081
+      targetPort: 8081
+      port: 8081
+      protocol: TCP
+  selector:
+    app: cloudnative-httpserver
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cloudnative-httpserver-configmap
+data:
+  VERSION_CONFIGMAP: "1.0.1-configmap"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: cloudnative-httpserver-secret
+type: Opaque
+data:
+  # echo -n '1.0.1-secret' | base64
+  VERSION_SECRET: MS4wLjEtc2VjcmV0
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ingress-httpserver
+spec:
+  tls:
+  - hosts:
+    -  foo.bar.com
+    secretName: foo-ingress-tls
+  rules:
+  - host: "foo.bar.com"
+    http:
+      paths:
+      - pathType: Prefix
+        path: "/"
+        backend:
+          service:
+            name: cloudnative-httpserver
+            port:
+              number: 8081
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: foo-ingress-tls
+type: kubernetes.io/tls
+data:
+  tls.crt: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSURNekNDQWh1Z0F3SUJBZ0lKQUlGYVAwQ21LYXN0TUEwR0NTcUdTSWIzRFFFQkN3VUFNREF4RkRBU0JnTlYKQkFNTUMyWnZieTVpWVhJdVkyOXRNUmd3RmdZRFZRUUtEQTltYjI4dGFXNW5jbVZ6Y3kxMGJITXdIaGNOTWpFeApNVEkyTVRNd056UTFXaGNOTWpJeE1USTJNVE13TnpRMVdqQXdNUlF3RWdZRFZRUUREQXRtYjI4dVltRnlMbU52CmJURVlNQllHQTFVRUNnd1BabTl2TFdsdVozSmxjM010ZEd4ek1JSUJJakFOQmdrcWhraUc5dzBCQVFFRkFBT0MKQVE4QU1JSUJDZ0tDQVFFQTJYSWdMV21ENGN5VGQ1bkhyNGhnTW9FUFMyOVhPQUhSRndNWVRUTk0wYnF2azFtdQp6U2FUb3drd0dsSWpjY0dYQXAwM0tSdW53UlpaWWNVT00yd0hmaUkwY3NPa1VSeGowcnhvUzRoSWprN1JiTWZ1ClNYbWtMRGtpNk5xa3gvNkZKRkdibVVvMzExWXAyL25NWVcxYmRzVXFqeGJYeVJWS2xqL0Fhd1BUS1owMEMxVUcKYlk0SnZPY0lCM3FPRm1GSEh5bnFsWlJWOVR2YzRhTUZUdVZ0T1UwaDZRQ2FZUVJtdUJENWNCNmMwQkdqblp1WgpLT3hBbEtsMjdGalBRZHFJNnRrUjczMjZCcks1LzNqME9qMjZ6ZzZEOWoydHNFUk9NUmpkeFVnaHk2OEd3ZmxNCkowRnBqVGczYlFvM2FmeTJtdnhTVmpVYTc4SmcrMDN2UDdaaUVRSURBUUFCbzFBd1RqQWRCZ05WSFE0RUZnUVUKTEk2NGZ2QlI1Q2tDQ2xRWmJlQlVCSjViOFpNd0h3WURWUjBqQkJnd0ZvQVVMSTY0ZnZCUjVDa0NDbFFaYmVCVQpCSjViOFpNd0RBWURWUjBUQkFVd0F3RUIvekFOQmdrcWhraUc5dzBCQVFzRkFBT0NBUUVBYlFKbXpnMkYyaklNCkc0cHdMNWNyOXFaMTFvK1hOZ25tRXR2Q05TTHQyZW5RWTh5UXoyYXBPekVmbWpwWkhWRmdXYXVuVmR1MzJFbm8Kcm8wODFVbkJETXZscUVMbVl2bWZHTXhXK0dpN3h5eG5EOEt1Wno2d2kwaGFDdnhobEpSVjd2UDBWRGxhZk5NVApGU25ITDhqVFovcFR1VWJBUnBINmM2eEhEUDh3U1UybWwvTVFzMHlYSTFwOURJTEJQVXBiUElzL293UGhybmlHCmFYeGdVVEdsL1FoVk1sbDdqclN0Zk9uSW1YV3piRlRPWUd3QTN5Q0FWcnU0bHFIOGdRcGJod1pxZy9USzcwMlkKb1FQNjFDRkNWMXNkTURxMU14QXphay81cG5DRVF1S1U2RUZYRzVBZnhLcjJYenJzNW92R1pIUFpOODJiWG9NNgp5RUk0NmV4akp3PT0KLS0tLS1FTkQgQ0VSVElGSUNBVEUtLS0tLQo=
+  tls.key: LS0tLS1CRUdJTiBQUklWQVRFIEtFWS0tLS0tCk1JSUV2Z0lCQURBTkJna3Foa2lHOXcwQkFRRUZBQVNDQktnd2dnU2tBZ0VBQW9JQkFRRFpjaUF0YVlQaHpKTjMKbWNldmlHQXlnUTlMYjFjNEFkRVhBeGhOTTB6UnVxK1RXYTdOSnBPakNUQWFVaU54d1pjQ25UY3BHNmZCRmxsaAp4UTR6YkFkK0lqUnl3NlJSSEdQU3ZHaExpRWlPVHRGc3grNUplYVFzT1NMbzJxVEgvb1VrVVp1WlNqZlhWaW5iCitjeGhiVnQyeFNxUEZ0ZkpGVXFXUDhCckE5TXBuVFFMVlFadGpnbTg1d2dIZW80V1lVY2ZLZXFWbEZYMU85emgKb3dWTzVXMDVUU0hwQUpwaEJHYTRFUGx3SHB6UUVhT2RtNWtvN0VDVXFYYnNXTTlCMm9qcTJSSHZmYm9Hc3JuLwplUFE2UGJyT0RvUDJQYTJ3UkU0eEdOM0ZTQ0hMcndiQitVd25RV21OT0RkdENqZHAvTGFhL0ZKV05ScnZ3bUQ3ClRlOC90bUlSQWdNQkFBRUNnZ0VBWDVoNDVQNGFhTTZUbG1VWkVPYVh4QnhSS1F6Ti8yVnRFdnpkVmpOVGRuRG8KZDVOWjhmOGZzUEY5SUZVMEYvTFAvT281TWUxaWx0VElmdDh2R3hSSFJ3Q3Fwam0wcDZRZmpxb2QvL2J1VHdILwp1Qjg5ZHpmdklUSU5VdW1zdisvNWdMb1AraGhTN0d5SkFwaVRiZEd5QUVrMktLb1dPK1VNWVhtdGtsNmdHdzZkCjdMUDBDQWg3Vmd3S2dkSEFiczZXRitYdnFyK09lWUh0RW14QURLRVhFeW1kU1ltSWRLNWJEaG1nMDY3bTAzdVIKM0duQngxZlltWkxjVmxMejB2OWgxSGE2VDdnT1dELzBYbDFQY2svOG44bVJ4MXFZVyszVzlEVzBwOXFRVVVCZwp4eWg1dXBPeW0xSjhTcE1BM240YnpwYk91OXpuWHAwd0NDbU03SUpkUVFLQmdRRDVHREl5b0N1Zjc0bWEzMkgxCkFqQTJYR1JoNVU2NURkZ2NaZXB2NzgyRVpDTGtzYytNTmhoS1ZTRlBYVWt3TG9qcmMySjJrQ3NGMXJtcmFNUW4KaURKNVU1b2R6cUtJejFxMk1aYWZ6ZTN1NFFHekRsQVVNQW02cGIxVG9TMjU1MXM2VUs4NHBxOVNYaTluQkJIOAo0WUJTSDVNN0kxc3FlWU9hY2orQmNkTzJ4UUtCZ1FEZmVWSTdjSERaTXpIWk9ER1pRR20rdGZEdTNMUnJCOTdPCmU3V1RldUJLZGZzU2t3RDhqaW1pWHZ3dktYbStFYmNFWFV4ektHVmtoblplN1MyMXlETWYzcTJJSWtHK21EVWIKdlBPb1ZwRFllVTlWbTE2NmRkVFZSc3NxV0VpdHFQZldMMUNKWmpqb2h3WUxuSXVvRjR2blJBemkyK0xuQXlqSgpyNzhGY0RUUzNRS0JnRC9uT2pHTXI4Um5JbWt0OTZad2VrZm42Z1RIWEN2VFptYmFxb3N1L1EyQzF3VE9yUTB1CmI0cmFUaUpiTDBTQ0c3UXp0TVh2OUdtYURhWHd5YW5Pb2d4SUsxaU1RMXhQdmRqUjNlOS9XQlFaZTJNaFA5LzkKOXZFQVJoTG5YYUM4dnNXMkgwMnNUWHdYRjVnWkRqaE83YW1qMmhTbzNHR0lMUC81WVZ0bkJVWjFBb0dCQUlYYQo3b1dKNFI1SVN1aDRmMFR6VHlPYmFUZzUzSnRyZUdxbnNPZ29wcVlUS3hOQ0dFb3VnUU92NzAvMGdPWjNSKytHClR0OS9aOVFoc2s5RHM2aDV4UjJtekx5SkFHWkFWemRKSTQxR1pMWTFXMjdFaEtZZEpDR25xTk94VTc4cFFXSDYKcnp2TmpmTEJ4YjQ0dzNJb3dIVUN6dEVuc2k1N052Z3ZtN1NQTkNURkFvR0JBSVlCZmlpallRN280OHpzWThEaQpSWjQwWDc2enFnQm5YeVpGWTdIbzBka25ISzlINlhTSUljZkFFOW0ranhGOXQ3NTdjdlBtd0tFZ0FtbW1RbkZHCllLbUVUT0tyZURoem5jUzYvaFR0Z01zODFablZhcEYzTEo2d2pEVDJHS0pWcUxTTkF3RVQxR2d2RHhjUUxYWEoKdUxxakFtUkVFMW11cFltOU1qVTI5ZFdnCi0tLS0tRU5EIFBSSVZBVEUgS0VZLS0tLS0K
+

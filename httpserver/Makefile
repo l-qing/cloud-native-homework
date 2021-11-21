@@ -2,6 +2,7 @@
 default: help
 
 ##@ Development
+VERSION ?= "latest"
 
 .PHONY: run test
 run: ## Run directly
@@ -16,13 +17,13 @@ test: ## Test use curl
 		http://localhost:8081/abc
 
 build: ## Build docker image
-	docker build --build-arg version=v2.1.0 . -t httpserver:latest
+	docker build --build-arg version=v2.1.0 . -t 190219044/httpserver:$(VERSION)
 
 push: ## Push docker image
-	docker push httpserver:latest
+	docker push 190219044/httpserver:$(VERSION)
 
 run-docker: ## Run docker image
-	docker run -it --name=httpserver --rm -p 8081:8081 httpserver:latest
+	docker run -it --name=httpserver --rm -p 8081:8081 190219044/httpserver:$(VERSION)
 
 ##@ General
 
