@@ -1,3 +1,62 @@
+# 模块十作业
+
+* 为 HTTPServer 添加 0-2 秒的随机延时
+* 为 HTTPServer 项目添加延时 Metric
+* 将 HTTPServer 部署至测试集群，并完成 Prometheus 配置
+* 从 Promethus 界面中查询延时指标数据
+* （可选）创建一个 Grafana Dashboard 展现延时分配情况
+
+## 作业说明
+* 随机延时: 已增加
+  ```go
+  func HandleGetAllData(c *gin.Context) {
+      // 增加随机延迟
+      sleep := time.Duration(rand.Intn(2000)) * time.Millisecond
+      time.Sleep(sleep)
+      ...
+  }
+  ```
+* 延时 Metric：通过中间件采集各请求指标
+  ```go
+  func prometheusMiddleware() gin.HandlerFunc {
+      return func(c *gin.Context) {
+          path := c.Request.URL.Path
+          if true && (path == "/metrics" || path == "/healthz") { // 忽略部分请求
+              c.Next()
+              return
+          }
+
+          timer := prometheus.NewTimer(httpDuration.WithLabelValues(path))
+          defer timer.ObserveDuration()
+
+          c.Next()
+
+          statusCode := strconv.Itoa(c.Writer.Status())
+          responseStatus.WithLabelValues(statusCode).Inc()
+          totalRequests.WithLabelValues(path).Inc()
+      }
+  }
+  ```
+
+* 完成 Prometheus 配置：增加了一个`ServiceMonitor`资源，并在`deployment`中添加了注解，便于自动采集数据
+* 查询延时指标数据：
+  ![image](./picture/Promethus.png)
+* 创建一个 Grafana Dashboard：配置文件在[`grafana-dashboard/httpserver-latency.json`](./grafana-dashboard/httpserver-latency.json)
+  ![image](./picture/GrafanaDashboard.png)
+
+## 使用说明
+1. 推送镜像
+
+```shell
+$ VERSION=2.0.1-metrics make build push
+```
+
+2. 创建 k8s 资源
+
+```shell
+$ kubectl apply -f deployment.yaml
+```
+
 # 模块八作业
 作业要求
 

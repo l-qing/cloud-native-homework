@@ -9,10 +9,14 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	log "k8s.io/klog/v2"
 )
 
@@ -23,12 +27,40 @@ var (
 	srv               *http.Server
 )
 
+// copy from https://gabrieltanner.org/blog/collecting-prometheus-metrics-in-golang
+var totalRequests = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "http_requests_total",
+		Help: "Number of get requests.",
+	},
+	[]string{"path"},
+)
+
+var responseStatus = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "response_status",
+		Help: "Status of HTTP response",
+	},
+	[]string{"status"},
+)
+
+var httpDuration = promauto.NewHistogramVec(prometheus.HistogramOpts{
+	Name: "http_response_time_seconds",
+	Help: "Duration of HTTP requests.",
+}, []string{"path"})
+
 func init() {
 	VERSION = os.Getenv("VERSION")
 	VERSION_SECRET = os.Getenv("VERSION_SECRET")
 	VERSION_CONFIGMAP = os.Getenv("VERSION_CONFIGMAP")
 	rand.Seed(time.Now().UnixNano())
 	log.InitFlags(nil)
+}
+
+func init() {
+	prometheus.Register(totalRequests)
+	prometheus.Register(responseStatus)
+	prometheus.Register(httpDuration)
 }
 
 func main() {
@@ -90,6 +122,8 @@ func httpServerStart() {
 	// Recovery middleware recovers from any panics and writes a 500 if there was one.
 	r.Use(gin.Recovery())
 
+	r.Use(prometheusMiddleware())
+
 	// LoggerWithFormatter middleware will write the logs to gin.DefaultWriter
 	// By default gin.DefaultWriter = os.Stdout
 	r.Use(gin.LoggerWithFormatter(func(param gin.LogFormatterParams) string {
@@ -122,6 +156,8 @@ func httpServerStart() {
 		c.String(200, "ok")
 	})
 
+	r.GET("/metrics", prometheusHandler())
+
 	srv = &http.Server{
 		Addr:    ":8081",
 		Handler: r,
@@ -136,6 +172,10 @@ func httpServerStart() {
 }
 
 func HandleGetAllData(c *gin.Context) {
+	// 增加随机延迟
+	sleep := time.Duration(rand.Intn(2000)) * time.Millisecond
+	time.Sleep(sleep)
+	//
 	body, _ := ioutil.ReadAll(c.Request.Body)
 	log.V(2).Infof("---body/--- \r\n" + string(body))
 	log.V(2).Infof("---header/--- \n")
@@ -146,7 +186,8 @@ func HandleGetAllData(c *gin.Context) {
 	}
 
 	c.JSON(200, gin.H{
-		"hello": "world",
+		"hello":    "world",
+		"usedtime": sleep.String(),
 	})
 }
 
@@ -156,5 +197,31 @@ func addVersionHeader() gin.HandlerFunc {
 		c.Header("Version-Secret", VERSION_SECRET)
 		c.Header("Version-Configmap", VERSION_CONFIGMAP)
 		c.Next()
+	}
+}
+
+func prometheusMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		path := c.Request.URL.Path
+		if true && (path == "/metrics" || path == "/healthz") { // 忽略部分请求
+			c.Next()
+			return
+		}
+
+		timer := prometheus.NewTimer(httpDuration.WithLabelValues(path))
+		defer timer.ObserveDuration()
+
+		c.Next()
+
+		statusCode := strconv.Itoa(c.Writer.Status())
+		responseStatus.WithLabelValues(statusCode).Inc()
+		totalRequests.WithLabelValues(path).Inc()
+	}
+}
+
+func prometheusHandler() gin.HandlerFunc {
+	h := promhttp.Handler()
+	return func(c *gin.Context) {
+		h.ServeHTTP(c.Writer, c.Request)
 	}
 }
