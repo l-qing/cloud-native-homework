@@ -1,3 +1,6 @@
+# 模块十二作业  
+详见：[homework.module.12.md](./homework.module.12.md#模块十二作业)
+
 # 模块十作业
 
 * 为 HTTPServer 添加 0-2 秒的随机延时
@@ -147,10 +150,10 @@ $ curl http://192.168.130.63:31081/hello
 
 5. 创建 TLS 证书 及给 Ingress 增加 TLS 配置
 ```
-$ openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+$ openssl req -x509 -sha256 -nodes -days 365 -newkey rsa:2048 \
     -out foo-ingress-tls.crt \
     -keyout foo-ingress-tls.key \
-    -subj "/CN=foo.bar.com/O=foo-ingress-tls"
+    -subj "/CN=foo.bar.com/O=*.bar.com"
 
 $ kubectl create secret tls foo-ingress-tls \
     --key foo-ingress-tls.key \

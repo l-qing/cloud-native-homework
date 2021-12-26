@@ -1,0 +1,80 @@
+apiVersion: networking.istio.io/v1beta1
+kind: Gateway
+metadata:
+  name: httpserver
+spec:
+  selector:
+    istio: ingressgateway
+  servers:
+    - hosts:
+        - foo.bar.com
+      port:
+        name: http-default
+        number: 80
+        protocol: HTTP
+---
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: httpserver
+spec:
+  gateways:
+    - httpserver
+  hosts:
+    - foo.bar.com
+  http:
+    - match:
+      - uri:
+          exact: "/rewrite/call-next-service/hello"
+      rewrite:
+        uri: "/call-next-service/hello"
+      route:
+        - destination:
+            host: cloudnative-httpserver-1.default.svc.cluster.local
+            port:
+              number: 8081
+    - match:
+        - port: 80
+      route:
+        - destination:
+            host: cloudnative-httpserver-1.default.svc.cluster.local
+            port:
+              number: 8081
+
+---
+apiVersion: networking.istio.io/v1beta1
+kind: Gateway
+metadata:
+  name: httpsserver
+spec:
+  selector:
+    istio: ingressgateway
+  servers:
+    - hosts:
+        - foo.bar.com
+      port:
+        name: https-default
+        number: 443
+        protocol: HTTPS
+      tls:
+        mode: SIMPLE
+        credentialName: foo-ingress-tls
+---
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: httpsserver
+spec:
+  gateways:
+    - httpsserver
+  hosts:
+    - foo.bar.com
+  http:
+    - match:
+        - port: 443
+      route:
+        - destination:
+            host: cloudnative-httpserver-1.default.svc.cluster.local
+            port:
+              number: 8081
+

@@ -1,0 +1,140 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cloudnative-httpserver-1
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cloudnative-httpserver-1
+  strategy:
+    rollingUpdate:
+      # 没有配置成默认的 25% 是因为避免在单节点场景下，只有1个实例时无法滚动更新。
+      maxSurge: 1
+      maxUnavailable: 1
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app: cloudnative-httpserver-1
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8081"
+    spec:
+      containers:
+        - name: httpserver
+          image: 190219044/httpserver:2.1.0
+          # imagePullPolicy: Always
+          imagePullPolicy: IfNotPresent
+          args:
+            # 调整日志级别
+            - -v=2  # TODO: 可以将日志级别等信息放入 configmap 在程序中再从读取
+            - --logtostderr
+          env:
+            - name: VERSION
+              value: "v2.1.0-service-1"
+            - name: NEXT_SERVICE_ADDR
+              value: "http://cloudnative-httpserver-2:8081/call-next-service/from-service-1"
+          ports:
+            - name: http
+              containerPort: 8081
+              protocol: TCP
+          # 资源需求
+          resources:
+            limits:
+              cpu: 100m
+              memory: 128Mi
+            requests:
+              cpu: 50m
+              memory: 64Mi
+---
+# 配置nodeport的服务，便于自测。
+apiVersion: v1
+kind: Service
+metadata:
+  name: cloudnative-httpserver-1
+  labels:
+    app: cloudnative-httpserver-1
+spec:
+  type: NodePort
+  externalTrafficPolicy: Cluster
+  ports:
+    - nodePort: 31082
+      targetPort: 8081
+      port: 8081
+      protocol: TCP
+      name: http
+  selector:
+    app: cloudnative-httpserver-1
+---
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cloudnative-httpserver-2
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cloudnative-httpserver-2
+  strategy:
+    rollingUpdate:
+      # 没有配置成默认的 25% 是因为避免在单节点场景下，只有1个实例时无法滚动更新。
+      maxSurge: 1
+      maxUnavailable: 1
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app: cloudnative-httpserver-2
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8081"
+    spec:
+      containers:
+        - name: httpserver
+          image: 190219044/httpserver:2.1.0
+          # imagePullPolicy: Always
+          imagePullPolicy: IfNotPresent
+          args:
+            # 调整日志级别
+            - -v=2  # TODO: 可以将日志级别等信息放入 configmap 在程序中再从读取
+            - --logtostderr
+          env:
+            - name: VERSION
+              value: "v2.1.0-service-2"
+            - name: NEXT_SERVICE_ADDR
+              value: "http://cloudnative-httpserver:8081/from-service-2"
+          ports:
+            - name: http
+              containerPort: 8081
+              protocol: TCP
+          # 资源需求
+          resources:
+            limits:
+              cpu: 100m
+              memory: 128Mi
+            requests:
+              cpu: 50m
+              memory: 64Mi
+---
+# 配置nodeport的服务，便于自测。
+apiVersion: v1
+kind: Service
+metadata:
+  name: cloudnative-httpserver-2
+  labels:
+    app: cloudnative-httpserver-2
+spec:
+  type: NodePort
+  externalTrafficPolicy: Cluster
+  ports:
+    - nodePort: 31083
+      targetPort: 8081
+      port: 8081
+      protocol: TCP
+      name: http
+  selector:
+    app: cloudnative-httpserver-2
+---
+

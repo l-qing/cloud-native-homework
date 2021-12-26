@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -24,6 +25,7 @@ var (
 	VERSION           string
 	VERSION_SECRET    string
 	VERSION_CONFIGMAP string
+	NEXT_SERVICE_ADDR string = "http://localhost:8081"
 	srv               *http.Server
 )
 
@@ -53,6 +55,7 @@ func init() {
 	VERSION = os.Getenv("VERSION")
 	VERSION_SECRET = os.Getenv("VERSION_SECRET")
 	VERSION_CONFIGMAP = os.Getenv("VERSION_CONFIGMAP")
+	NEXT_SERVICE_ADDR = os.Getenv("NEXT_SERVICE_ADDR")
 	rand.Seed(time.Now().UnixNano())
 	log.InitFlags(nil)
 }
@@ -97,7 +100,7 @@ func main() {
 }
 
 func mockDelay() {
-	log.V(1).InfoS("debug", "VERSION", VERSION,
+	log.V(1).InfoS("debug", "VERSION", VERSION, "NEXT_SERVICE_ADDR", NEXT_SERVICE_ADDR,
 		"VERSION_SECRET", VERSION_SECRET, "VERSION_CONFIGMAP", VERSION_CONFIGMAP)
 
 	// Simulation of start-up elapsed time
@@ -148,6 +151,11 @@ func httpServerStart() {
 	// 	c.String(http.StatusOK, "ohai")
 	// })
 
+	nextGroup := r.Group("/call-next-service")
+	nextGroup.GET("/*any", func(c *gin.Context) {
+		callNextServiceHandler(c)
+	})
+
 	r.NoRoute(func(c *gin.Context) {
 		HandleGetAllData(c)
 	})
@@ -187,6 +195,7 @@ func HandleGetAllData(c *gin.Context) {
 
 	c.JSON(200, gin.H{
 		"hello":    "world",
+		"version":  VERSION,
 		"usedtime": sleep.String(),
 	})
 }
@@ -224,4 +233,35 @@ func prometheusHandler() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		h.ServeHTTP(c.Writer, c.Request)
 	}
+}
+
+func callNextServiceHandler(c *gin.Context) {
+	any := c.Param("any")
+	log.V(2).InfoS("entering `call next service` handler", "any", any)
+	// 增加随机延迟
+	sleep := time.Duration(rand.Intn(2000)) * time.Millisecond
+	time.Sleep(sleep)
+	//
+	log.V(2).Infof("===================Details of the http request header:============\n")
+	req, err := http.NewRequest("GET", NEXT_SERVICE_ADDR, nil)
+	if err != nil {
+		fmt.Printf("%s", err)
+	}
+	lowerCaseHeader := make(http.Header)
+	for key, value := range c.Request.Header {
+		lowerCaseHeader[strings.ToLower(key)] = value
+	}
+	log.V(2).InfoS("headers:", lowerCaseHeader)
+	req.Header = lowerCaseHeader
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		log.V(1).InfoS("HTTP get failed with error: ", "error", err)
+	} else {
+		log.V(2).InfoS("HTTP get succeeded")
+	}
+	if resp != nil {
+		resp.Write(c.Writer)
+	}
+	log.V(2).Infof("Respond in %s", sleep.String())
 }

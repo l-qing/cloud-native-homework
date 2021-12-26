@@ -23,15 +23,16 @@ spec:
     spec:
       containers:
         - name: httpserver
-          image: 190219044/httpserver:2.0.1-metrics
-          imagePullPolicy: Always
+          image: 190219044/httpserver:2.1.0
+          # imagePullPolicy: Always
+          imagePullPolicy: IfNotPresent
           args:
             # 调整日志级别
             - -v=2  # TODO: 可以将日志级别等信息放入 configmap 在程序中再从读取
             - --logtostderr
           env:
             - name: VERSION
-              value: "1.0.1"
+              value: "v2.1.0-service-finally"
           # 配置和代码分离
           envFrom:
             - configMapRef:
